@@ -1,0 +1,8 @@
+*.log
+*.tmp
+.claude/
+claudezen-reasoning-cache.json
+deepseek-v4-opencode-claude-code-bridge-reasoning-cache.json
+deepseek-v4-opencode-claude-code-reasoning-cache.json
+opencode-proxy-reasoning-cache.json
+node_modules/

@@ -259,7 +259,7 @@ $isDarkTheme = -not (Test-WindowsLightTheme)
 
 $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $notifyIcon.Icon = Get-TrayIcon
-$notifyIcon.Text = "DeepSeek V4 Claude Code Bridge"
+$notifyIcon.Text = "OpenCode Claude Bridge"
 $notifyIcon.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
@@ -296,10 +296,10 @@ $trimCacheItem.add_Click({
     Stop-Bridge
     $message = Trim-ReasoningCacheToHalf
     Start-Bridge
-    $notifyIcon.ShowBalloonTip(3000, "DeepSeek V4 Bridge", "$message Bridge restarted.", [System.Windows.Forms.ToolTipIcon]::Info)
+    $notifyIcon.ShowBalloonTip(3000, "OpenCode Claude Bridge", "$message Bridge restarted.", [System.Windows.Forms.ToolTipIcon]::Info)
   } catch {
     Start-Bridge
-    $notifyIcon.ShowBalloonTip(5000, "DeepSeek V4 Bridge", "Cache trim failed: $($_.Exception.Message)", [System.Windows.Forms.ToolTipIcon]::Error)
+    $notifyIcon.ShowBalloonTip(5000, "OpenCode Claude Bridge", "Cache trim failed: $($_.Exception.Message)", [System.Windows.Forms.ToolTipIcon]::Error)
   }
 })
 
@@ -307,9 +307,9 @@ $restartItem.add_Click({
   try {
     Stop-Bridge
     Start-Bridge
-    $notifyIcon.ShowBalloonTip(1500, "DeepSeek V4 Bridge", "Bridge restarted.", [System.Windows.Forms.ToolTipIcon]::Info)
+    $notifyIcon.ShowBalloonTip(1500, "OpenCode Claude Bridge", "Bridge restarted.", [System.Windows.Forms.ToolTipIcon]::Info)
   } catch {
-    $notifyIcon.ShowBalloonTip(3000, "DeepSeek V4 Bridge", $_.Exception.Message, [System.Windows.Forms.ToolTipIcon]::Error)
+    $notifyIcon.ShowBalloonTip(3000, "OpenCode Claude Bridge", $_.Exception.Message, [System.Windows.Forms.ToolTipIcon]::Error)
   }
 })
 

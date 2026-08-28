@@ -11,9 +11,7 @@
     "mimo-v2.5-free",
     "hy3-free"
   ],
-  "fallbackModels": [
-    "deepseek-v4-flash-free"
-  ],
+  "fallbackModels": [],
   "reasoningContent": "auto",
   "reasoningCacheMaxEntries": 0,
   "reasoningCacheMaxAgeMs": 2592000000,

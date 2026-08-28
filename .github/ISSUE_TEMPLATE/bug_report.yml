@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a problem with ClaudeZen
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    valid: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce it? Include the request, config, and logs.
+    valid: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    valid: true
+  - type: input
+    id: version
+    attributes:
+      label: ClaudeZen version
+      placeholder: e.g. 0.2.1
+    valid: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      placeholder: e.g. 20.11.0
+    valid: true
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Safety check
+      options:
+        - label: I have not included any real API keys or tokens in this report.
+          required: true

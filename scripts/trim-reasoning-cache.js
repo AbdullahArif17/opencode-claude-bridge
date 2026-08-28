@@ -7,7 +7,7 @@ const path = require("path");
 const DEFAULT_REASONING_CACHE_PATH = path.join(
   os.homedir(),
   ".claude",
-  "claudezen-reasoning-cache.json",
+  "opencode-claude-bridge-reasoning-cache.json",
 );
 const DEFAULT_REASONING_CACHE_MAX_SIZE_BYTES = 200 * 1024 * 1024;
 const REASONING_BUCKETS = [

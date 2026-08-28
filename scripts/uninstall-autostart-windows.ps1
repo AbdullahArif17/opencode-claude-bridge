@@ -1,5 +1,5 @@
 param(
-  [string]$TaskName = "DeepSeekV4OpenCodeClaudeCodeBridge"
+  [string]$TaskName = "OpenCodeClaudeBridge"
 )
 
 $ErrorActionPreference = "Stop"

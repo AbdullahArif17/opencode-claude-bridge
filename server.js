@@ -1034,6 +1034,15 @@ function requestProcessShutdown(server) {
   });
 }
 
+function shouldRotateToNextModel(status, bodyText) {
+  if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
+    return true;
+  }
+  if (status !== 400) return false;
+  return /model is unavailable|model unavailable|model not found|model_not_found/i.test(bodyText || "")
+    || /no allowed providers are available|no allowed providers|provider\.only|providers serving/i.test(bodyText || "");
+}
+
 async function callOpenCode(req, payload, upstreamContext) {
   const upstreamApiKey = requestAuthToken(req);
 
@@ -1105,20 +1114,12 @@ async function callOpenCode(req, payload, upstreamContext) {
        * Rotate only on rate limits / temporary upstream failures.
        * Do not hide genuine request/configuration errors.
        */
-      const isModelUnavailable =
-        response.status === 400 &&
-        /model is unavailable|model unavailable|model not found|model_not_found/i.test(text);
-
-      const isRetryableStatus =
-        [429, 500, 502, 503, 504].includes(response.status) ||
-        isModelUnavailable;
-
-      if (!isRetryableStatus) {
+      if (!shouldRotateToNextModel(response.status, text)) {
         throw error;
       }
 
       console.log(
-        `[ROTATION] ${model} unavailable. Trying next model...`,
+        `[ROTATION] ${model} unavailable/routing failed. Trying next model...`,
       );
     } catch (error) {
       if (upstreamContext.signal.aborted) {
@@ -1665,6 +1666,7 @@ module.exports = {
   requestAuthToken,
   saveReasoningCacheNow,
   setToolReasoning,
+  shouldRotateToNextModel,
   startServer,
   streamOpenAiAsAnthropic,
   upstreamResponseHeaders,

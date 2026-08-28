@@ -1,11 +1,12 @@
-# OpenCode ↔ Claude Code Bridge
+# OpenCode Claude Bridge
 
-> A lightweight local proxy that lets **Claude Code** call **OpenCode Zen models (DeepSeek V4, MoMo, Hy3, Nemotron, etc.)** —
-> with full reasoning-content replay so thinking-mode tool calls keep working.
+> A drop-in local proxy that lets **Claude Code** run on **OpenCode Zen** — DeepSeek V4
+> and other OpenCode models — with full `reasoning_content` replay so thinking-mode tool
+> calls keep working.
 
 Claude Code speaks the Anthropic `/v1/messages` API. OpenCode Zen exposes models through
 an OpenAI-compatible `/v1/chat/completions` endpoint. This bridge translates between the two
-protocols and preserves the `reasoning_content` history that thinking-mode and
+protocols **and** preserves the DeepSeek `reasoning_content` history that thinking-mode and
 tool-calling flows require.
 
 ---
@@ -37,6 +38,89 @@ tool-calling flows require.
   mapping (including cache-hit / cache-miss tokens).
 - **Local-first & zero-dependency** — pure Node.js (`>=18`), no `npm install` needed.
   Listens on loopback by default.
+
+---
+
+## Architecture
+
+```
+Claude Code                  Bridge (this server)                OpenCode Zen
+   │                              │                                    │
+   │  POST /v1/messages           │                                    │
+   │  (Anthropic format)          │                                    │
+   ├─────────────────────────────►│                                    │
+   │                              │  Anthropic → OpenAI payload        │
+   │                              │  (+ reasoning_content replay)      │
+   │                              ├───────────────────────────────────►│
+   │                              │  POST /v1/chat/completions         │
+   │                              │  (Bearer = ANTHROPIC_API_KEY)      │
+   │                              │◄───────────────────────────────────┤
+   │                              │  SSE (content + reasoning_content) │
+   │  SSE thinking + text + tool  │                                    │
+   │◄─────────────────────────────┤                                    │
+   │                              │  cache reasoning for next turns    │
+```
+
+1. Claude Code sends an Anthropic-style request to the bridge (e.g. `http://127.0.0.1:8787`).
+2. The bridge converts messages, tools, `tool_choice`, `thinking`, and `output_config.effort`
+   into an OpenAI-compatible payload and attaches previous `reasoning_content` where DeepSeek
+   requires it.
+3. The request is forwarded to OpenCode Zen with your OpenCode Go API key as a Bearer token.
+4. Streaming responses are translated back into Anthropic `thinking` / `text` / `tool_use`
+   content blocks, and the reasoning is cached for later replay.
+
+### Request & fallback flow
+
+For each `/v1/messages` request the bridge builds one OpenAI-compatible payload and then runs
+a **single-provider rotation loop** over the configured model list (see
+[How Model Rotation Works](#how-model-rotation-works)):
+
+```
+payload built once
+        │
+        ▼
+for model in [ fallbackModels OR models ]:
+        ├─ POST /chat/completions (model)
+        ├─ 2xx ...............► return translated stream
+        ├─ retryable (429/5xx/400-unavailable)
+        │                     └─► log + try NEXT model
+        └─ fatal (401/403/other 400)
+                              └─► throw (no rotation)
+        │
+        ▼
+all models exhausted ──► 502 "All configured OpenCode models failed"
+```
+
+The rotation pool is `fallbackModels` when it is non-empty; otherwise it is `models`. This is
+a failover **within OpenCode Zen**, not a switch between unrelated providers.
+
+---
+
+## How Model Rotation Works
+
+OpenCode Claude Bridge rotates **between models on the same OpenCode Zen upstream** when the
+current model is temporarily unusable. Rotation is deliberate: it hides transient failures but
+never hides a genuine request or authentication error.
+
+A model is skipped and the next one is tried when the upstream returns:
+
+| Status | Body condition | Rotates? | Reason |
+|--------|----------------|----------|--------|
+| `429` | — | ✅ | Rate limited. |
+| `500`, `502`, `503`, `504` | — | ✅ | Temporary upstream failure. |
+| `400` | body matches `model is unavailable` / `model not found` / `no allowed providers` / provider-routing errors | ✅ | Model unavailable or not routable right now. |
+| `400` | other (bad JSON, invalid `reasoning_effort`, malformed request) | ❌ | Your request is wrong — rotate would just fail again. |
+| `401`, `403` | — | ❌ | Auth failure — all models share the same key, so rotating is pointless. |
+| other `4xx` | — | ❌ | Client error; do not retry. |
+
+Notes:
+
+- The rotation list is `fallbackModels` when non-empty, otherwise `models`
+  (see [Configuration](#configuration)). For typical use, set `models` to your preferred
+  order and leave `fallbackModels` empty.
+- If every model in the list fails, the bridge returns `502` with
+  `All configured OpenCode models failed` and the last error attached.
+- Network errors / aborts also advance to the next model (or abort if the client disconnected).
 
 ---
 
@@ -86,10 +170,10 @@ variable. See `config.example.json` for the full annotated schema.
 | `listen.host` | `CLAUDE_OPENCODE_PROXY_HOST` | `127.0.0.1` | Bind host. Keep loopback unless you expose intentionally. |
 | `listen.port` | `CLAUDE_OPENCODE_PROXY_PORT` | `8787` | 1–65535. |
 | `upstream.baseUrl` | `CLAUDE_OPENCODE_PROXY_UPSTREAM_BASE_URL` | `https://opencode.ai/zen/v1` | `/v1` appended if missing. |
-| `models` | — | DeepSeek V4 list | Preferred order. Use raw Go model IDs (e.g. `deepseek-v4-flash-free`, `kimi-k2.6`), **not** `opencode-go/...`. |
-| `fallbackModels` | — | `[]` | Extra rotation pool used when `models` are exhausted. |
+| `models` | — | configured list | Preferred rotation order. Use raw Go model IDs (e.g. `deepseek-v4-flash-free`, `kimi-k2.6`), **not** `opencode-go/...`. |
+| `fallbackModels` | — | `[]` | If non-empty, **replaces** `models` as the rotation pool. Leave `[]` to rotate over `models`. |
 | `reasoningContent` | `CLAUDE_OPENCODE_REASONING_CONTENT` | `auto` | `auto` = send to DeepSeek models only; `always`/`never` force it. |
-| `reasoningCachePath` | `CLAUDE_OPENCODE_REASONING_CACHE` | `~/.claude/deepseek-claude-bridge-reasoning-cache.json` | Supports `~`. |
+| `reasoningCachePath` | `CLAUDE_OPENCODE_REASONING_CACHE` | `~/.claude/opencode-claude-bridge-reasoning-cache.json` | Supports `~`. |
 | `upstreamTimeoutMs` | `CLAUDE_OPENCODE_UPSTREAM_TIMEOUT_MS` | `600000` | `0` disables the timeout. |
 
 Set `CLAUDE_OPENCODE_LOG_USAGE=1` to print raw → translated token usage in the logs.
@@ -105,7 +189,7 @@ Add this to your Claude Code `settings.json` (or set the same environment variab
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787",
-    "ANTHROPIC_API_KEY": "sk-your-opencode-go-key",
+    "ANTHROPIC_API_KEY": "YOUR_OPENCODE_API_KEY",
     "ANTHROPIC_MODEL": "deepseek-v4-flash-free",
     "ANTHROPIC_SMALL_FAST_MODEL": "deepseek-v4-flash-free",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4-flash-free",
@@ -227,7 +311,7 @@ Install a background launcher so the bridge starts with your session:
 
 ```bash
 curl http://127.0.0.1:8787/health
-curl -H "x-api-key: sk-your-opencode-go-key" "http://127.0.0.1:8787/health?probe=upstream"
+curl -H "x-api-key: YOUR_OPENCODE_API_KEY" "http://127.0.0.1:8787/health?probe=upstream"
 ```
 
 ---
@@ -312,6 +396,57 @@ npm test
   `reasoning_content` behavior and thinking-mode tool-call history requirements.
 - [OpenCode Zen](https://opencode.ai) — upstream provider.
 - [DeepSeek API docs](https://api-docs.deepseek.com) — model and reasoning details.
+
+---
+
+## Limitations
+
+- **Single upstream.** Rotation is failover *within* OpenCode Zen. There is no built-in
+  multi-provider switch; pointing `upstream.baseUrl` at a different endpoint changes the
+  target but does not combine providers.
+- **Reasoning replay is best-effort.** It targets DeepSeek-style `reasoning_content`. Other
+  OpenCode models may not emit it, in which case thinking simply won't appear.
+- **`thinking` / `reasoning_effort` are DeepSeek-only extensions.** They are forwarded only
+  when the model name looks like a DeepSeek model, so non-DeepSeek models keep the standard
+  OpenAI shape.
+- **Local proxy, not a hosted service.** The bridge runs on your machine and binds to
+  `127.0.0.1` by default. Exposing it publicly is out of scope.
+- **Upstream shape can change.** Translation depends on OpenCode Zen's OpenAI-compatible
+  contract; upstream API changes may require a bridge update.
+
+---
+
+## Roadmap
+
+- Per-model timeouts and backoff between rotation attempts.
+- Optional provider plugins behind a stable adapter interface (without changing the core
+  translation path).
+- Richer health probe output (per-model reachability).
+- Configurable rotation policy (strict vs. aggressive) via `config.json`.
+
+These are ideas, not commitments — see [Contributing](#contributing) to shape them.
+
+---
+
+## Contributing
+
+Pull requests and issues are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first:
+run `npm run check` and `npm test`, keep diffs focused, and never commit real API keys
+(use the `YOUR_OPENCODE_API_KEY` placeholder). Security issues go through
+[SECURITY.md](SECURITY.md), not public issues.
+
+---
+
+## OpenCode Attribution
+
+OpenCode Claude Bridge is an **independent, community-maintained project**. It is **not** an
+official OpenCode project and is not affiliated with or endorsed by the OpenCode maintainers.
+
+[OpenCode Zen](https://opencode.ai) is a supported **upstream / platform dependency**: the
+bridge translates Claude Code's Anthropic-format requests into OpenCode Zen's
+OpenAI-compatible API and forwards them there. We mention OpenCode only where it is
+technically relevant (configuration, routing, and upstream errors). All trademarks and
+service names belong to their respective owners.
 
 ---
 

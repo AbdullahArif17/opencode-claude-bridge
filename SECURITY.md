@@ -2,12 +2,12 @@
 
 ## Supported Versions
 
-OpenCode Claude Bridge is pre-1.0 and tracks the `master` branch. Security fixes
-land on `master` and are released as part of the next patch version.
+OpenCode Claude Bridge is pre-1.0 and tracks the `main` branch. Security fixes
+land on `main` and are released as part of the next patch version.
 
 | Version | Supported |
 |---------|-----------|
-| master  | ✅ yes    |
+| main    | ✅ yes    |
 | < 0.2   | ❌ no     |
 
 ## Reporting a Vulnerability

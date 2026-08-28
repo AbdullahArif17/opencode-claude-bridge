@@ -1,5 +1,7 @@
 *.log
 *.tmp
+.env
+config.json
 .claude/
 claudezen-reasoning-cache.json
 deepseek-v4-opencode-claude-code-bridge-reasoning-cache.json

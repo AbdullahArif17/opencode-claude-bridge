@@ -990,10 +990,14 @@ test("shouldRotateToNextModel rotates on retryable statuses and detected unavail
   assert.equal(bridge.shouldRotateToNextModel(400, "model_not_found"), true);
   assert.equal(bridge.shouldRotateToNextModel(400, "no allowed providers are available"), true);
   assert.equal(bridge.shouldRotateToNextModel(400, "providers serving this request are down"), true);
+  assert.equal(bridge.shouldRotateToNextModel(400, "Provider returned error"), true);
 
   // Non-rotating errors: genuine request/configuration/auth failures
   assert.equal(bridge.shouldRotateToNextModel(400, "invalid JSON in request"), false);
   assert.equal(bridge.shouldRotateToNextModel(400, "invalid reasoning_effort value"), false);
+  assert.equal(bridge.shouldRotateToNextModel(400, "reasoning_effort must be one of: no_think, low, high"), false);
+  assert.equal(bridge.shouldRotateToNextModel(400, "invalid_request"), false);
+  assert.equal(bridge.shouldRotateToNextModel(400, "invalid tool definition"), false);
   assert.equal(bridge.shouldRotateToNextModel(401, "unauthorized"), false);
   assert.equal(bridge.shouldRotateToNextModel(403, "forbidden"), false);
   assert.equal(bridge.shouldRotateToNextModel(404, "not found"), false);
@@ -1014,6 +1018,100 @@ test("The bridge rotates to the next model after a 503 from the first model", as
       if (body.model === "test-model-a") {
         res.writeHead(503, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "service unavailable" }));
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        id: "chatcmpl_1",
+        model: body.model,
+        choices: [
+          {
+            index: 0,
+            finish_reason: "stop",
+            message: { role: "assistant", content: `ok from ${body.model}` },
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      }));
+    });
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const upstreamPort = upstream.address().port;
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claudzen-rotate-"));
+  const tempConfig = path.join(tempDir, "config.json");
+  fs.writeFileSync(
+    tempConfig,
+    JSON.stringify({
+      listen: { host: "127.0.0.1", port: 8787 },
+      upstream: { baseUrl: `http://127.0.0.1:${upstreamPort}/v1` },
+      models: ["test-model-a", "test-model-b"],
+      fallbackModels: [],
+    }),
+    "utf8",
+  );
+
+  const originalConfig = process.env.CLAUDE_OPENCODE_PROXY_CONFIG;
+  const originalHost = process.env.CLAUDE_OPENCODE_PROXY_HOST;
+  const originalUpstream = process.env.CLAUDE_OPENCODE_PROXY_UPSTREAM_BASE_URL;
+  process.env.CLAUDE_OPENCODE_PROXY_CONFIG = tempConfig;
+  process.env.CLAUDE_OPENCODE_PROXY_HOST = "127.0.0.1";
+
+  const serverPath = require.resolve("../server.js");
+  delete require.cache[serverPath];
+  let limitedBridge;
+  let server;
+  try {
+    limitedBridge = require("../server.js");
+    server = limitedBridge.createServer();
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = server.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": "dummy-key" },
+      body: JSON.stringify({
+        model: "test-model-a",
+        max_tokens: 16,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(seenModels, ["test-model-a", "test-model-b"]);
+    const out = await response.json();
+    assert.equal(out.type, "message");
+    assert.match(out.content[0].text, /ok from test-model-b/);
+  } finally {
+    if (server) await new Promise((resolve) => server.close(resolve));
+    upstream.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    delete require.cache[serverPath];
+    if (originalConfig === undefined) delete process.env.CLAUDE_OPENCODE_PROXY_CONFIG;
+    else process.env.CLAUDE_OPENCODE_PROXY_CONFIG = originalConfig;
+    if (originalHost === undefined) delete process.env.CLAUDE_OPENCODE_PROXY_HOST;
+    else process.env.CLAUDE_OPENCODE_PROXY_HOST = originalHost;
+    if (originalUpstream === undefined) delete process.env.CLAUDE_OPENCODE_PROXY_UPSTREAM_BASE_URL;
+    else process.env.CLAUDE_OPENCODE_PROXY_UPSTREAM_BASE_URL = originalUpstream;
+    require("../server.js");
+  }
+});
+
+test("The bridge rotates to the next model after a 400 provider-only availability error", async () => {
+  const seenModels = [];
+  const upstream = http.createServer((req, res) => {
+    let data = "";
+    req.on("data", (chunk) => {
+      data += chunk;
+    });
+    req.on("end", () => {
+      const body = JSON.parse(data || "{}");
+      seenModels.push(body.model);
+      if (body.model === "test-model-a") {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          error: "No allowed providers are available for the selected model. Providers serving xiaomi/mimo-v2.5-20260422: gmicloud, deepinfra, xiaomi, but your request's provider.only preference permits only: tencent.",
+        }));
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });

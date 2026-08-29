@@ -1034,13 +1034,21 @@ function requestProcessShutdown(server) {
   });
 }
 
+function isModelProviderUnavailable(status, bodyText) {
+  if (status !== 400) return false;
+  const text = bodyText || "";
+  return (
+    /model is unavailable|model unavailable|model not found|model_not_found/i.test(text) ||
+    /no allowed providers are available|no allowed providers|provider\.only|providers serving/i.test(text) ||
+    /provider returned error/i.test(text)
+  );
+}
+
 function shouldRotateToNextModel(status, bodyText) {
   if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
     return true;
   }
-  if (status !== 400) return false;
-  return /model is unavailable|model unavailable|model not found|model_not_found/i.test(bodyText || "")
-    || /no allowed providers are available|no allowed providers|provider\.only|providers serving/i.test(bodyText || "");
+  return isModelProviderUnavailable(status, bodyText);
 }
 
 async function callOpenCode(req, payload, upstreamContext) {

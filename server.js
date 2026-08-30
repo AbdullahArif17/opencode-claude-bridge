@@ -4,7 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
+const DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1";
 const DEFAULT_MODELS = ["deepseek-v4-pro[1m]", "deepseek-v4-flash"];
 const DEFAULT_REASONING_CACHE_PATH = path.join(
   os.homedir(),
@@ -1034,20 +1034,47 @@ function requestProcessShutdown(server) {
   });
 }
 
+// Decides whether a non-OK upstream response should trigger rotation to the
+// next configured model. Intentionally narrow: only rate limits, transient
+// 5xx, and an explicitly detected "model unavailable" / provider-routing
+// failure rotate. Auth errors (401/403) and other 4xx are real
+// request/configuration errors and are surfaced to the caller instead of being
+// hidden behind another model.
 function isModelProviderUnavailable(status, bodyText) {
-  if (status !== 400) return false;
   const text = bodyText || "";
+
+  const modelUnavailable =
+    /model is unavailable|model unavailable|model not found|model_not_found/i.test(text);
+
+  const routingFailure =
+    /no allowed providers are available|no allowed providers|provider\.only|providers serving/i.test(text);
+
+  const providerFailure =
+    /provider returned error/i.test(text);
+
+  const regionRestricted =
+    status === 403 &&
+    /regionerror|not available in your country|not available in your region|country|region/i.test(text);
+
   return (
-    /model is unavailable|model unavailable|model not found|model_not_found/i.test(text) ||
-    /no allowed providers are available|no allowed providers|provider\.only|providers serving/i.test(text) ||
-    /provider returned error/i.test(text)
+    modelUnavailable ||
+    routingFailure ||
+    providerFailure ||
+    regionRestricted
   );
 }
 
 function shouldRotateToNextModel(status, bodyText) {
-  if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
+  if (
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  ) {
     return true;
   }
+
   return isModelProviderUnavailable(status, bodyText);
 }
 
@@ -1673,8 +1700,8 @@ module.exports = {
   reasoningFromMessage,
   requestAuthToken,
   saveReasoningCacheNow,
-  setToolReasoning,
   shouldRotateToNextModel,
+  setToolReasoning,
   startServer,
   streamOpenAiAsAnthropic,
   upstreamResponseHeaders,

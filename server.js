@@ -1044,12 +1044,15 @@ function isModelProviderUnavailable(status, bodyText) {
   const text = bodyText || "";
 
   const modelUnavailable =
+    status === 400 &&
     /model is unavailable|model unavailable|model not found|model_not_found/i.test(text);
 
   const routingFailure =
+    status === 400 &&
     /no allowed providers are available|no allowed providers|provider\.only|providers serving/i.test(text);
 
   const providerFailure =
+    status === 400 &&
     /provider returned error/i.test(text);
 
   const regionRestricted =
